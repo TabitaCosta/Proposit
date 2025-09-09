@@ -4,68 +4,86 @@ namespace App\Http\Controllers;
 
 use App\Models\Event;
 use Illuminate\Http\Request;
+use App\Services\EventService;
+use App\DTOs\EventDTO;
+use App\Http\Controllers\Controller;
 
 class EventController extends Controller
 {
-    // Lista todos os eventos
+    protected $eventService;
+
+    public function __construct(EventService $eventService)
+    {
+        $this->eventService = $eventService;
+        $this->middleware('auth'); // só usuários logados
+    }
+
     public function index()
     {
-        $events = Event::all();
+        $events = $this->eventService->getAll();
         return view('events.index', compact('events'));
     }
 
-    // Mostra o formulário para criar um novo evento
     public function create()
     {
         return view('events.create');
     }
 
-    // Salva o novo evento no banco
     public function store(Request $request)
     {
         $data = $request->validate([
-            'name' => 'required|string|max:255',
+            'name' => 'required|string',
             'description' => 'nullable|string',
             'start_date' => 'required|date',
-            'end_date' => 'nullable|date|after_or_equal:start_date',
+            'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
-        Event::create($data);
+        // Cria DTO com user_id do criador
+        $dto = new EventDTO(array_merge($data, [
+            'user_id' => $request->user()->id
+        ]));
+
+        $event = $this->eventService->create($dto);
 
         return redirect()->route('events.index')->with('success', 'Evento criado com sucesso!');
     }
 
-    // Mostra um evento específico (opcional, pode usar apenas index)
     public function show(Event $event)
     {
-        return view('events.show', compact('event')); // se criar view show
+        return view('events.show', compact('event'));
     }
 
-    // Mostra o formulário para editar o evento
     public function edit(Event $event)
     {
+        $this->authorize('update', $event); // só dono pode editar
+
         return view('events.edit', compact('event'));
     }
 
-    // Atualiza o evento no banco
     public function update(Request $request, Event $event)
     {
+        $this->authorize('update', $event);
+
         $data = $request->validate([
-            'name' => 'required|string|max:255',
+            'name' => 'required|string',
             'description' => 'nullable|string',
             'start_date' => 'required|date',
-            'end_date' => 'nullable|date|after_or_equal:start_date',
+            'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
-        $event->update($data);
+        $dto = new EventDTO($data);
+
+        $this->eventService->update($event, $dto);
 
         return redirect()->route('events.index')->with('success', 'Evento atualizado com sucesso!');
     }
 
-    // Deleta o evento
     public function destroy(Event $event)
     {
-        $event->delete();
-        return redirect()->route('events.index')->with('success', 'Evento excluído com sucesso!');
+        $this->authorize('delete', $event);
+
+        $this->eventService->delete($event);
+
+        return redirect()->route('events.index')->with('success', 'Evento removido com sucesso!');
     }
 }

@@ -17,7 +17,7 @@ class Proposal extends Model
     ];
 
     // Evento associado à proposta
-    public function event(): BelongsTo
+     public function event()
     {
         return $this->belongsTo(Event::class);
     }

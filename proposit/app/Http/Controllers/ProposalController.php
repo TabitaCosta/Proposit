@@ -2,86 +2,117 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Proposal;
 use Illuminate\Http\Request;
+use App\Services\ProposalService;
+use App\DTOs\ProposalDTO;
 use App\Models\User;
 use App\Models\Event;
 use App\Models\ProposalStatus;
+use App\Models\Proposal; 
 
 class ProposalController extends Controller
 {
-    // Lista todas as propostas
+    protected $proposalService;
+
+    public function __construct(ProposalService $proposalService)
+    {
+        $this->proposalService = $proposalService;
+        $this->middleware('auth'); // garante que só usuários logados acessem
+    }
+
     public function index()
     {
-        $proposals = Proposal::with(['user', 'event', 'status'])->get();
+        $proposals = $this->proposalService->getAll();
         return view('proposals.index', compact('proposals'));
     }
 
-    // Mostra o formulário para criar uma nova proposta
     public function create()
     {
-        $users = User::all();
-        $events = Event::all();
-        $statuses = ProposalStatus::all();
+        $users = User::all(); 
+        $events = Event::all(); 
+        $statuses = ProposalStatus::all(); // buscar todos os status
+
         return view('proposals.create', compact('users', 'events', 'statuses'));
     }
 
-    // Salva a nova proposta no banco
+
     public function store(Request $request)
     {
         $data = $request->validate([
-            'event_id' => 'required|exists:events,id',
-            'user_id' => 'required|exists:users,id',
-            'proposal_status_id' => 'nullable|exists:proposal_statuses,id',
-            'title' => 'required|string|max:255',
+            'title' => 'required|string',
             'abstract' => 'required|string',
             'details' => 'nullable|string',
+            'event_id' => 'required|exists:events,id',
         ]);
 
-        // Definir status padrão "pendente" se não informado
-        if (!isset($data['proposal_status_id'])) {
-            $data['proposal_status_id'] = 1; // pendente
-        }
+        // Cria DTO e atribui o usuário logado
+        $dto = new ProposalDTO(array_merge($data, [
+            'user_id' => $request->user()->id,
+            'proposal_status_id' => 1, // status inicial
+        ]));
 
-        Proposal::create($data);
+        $proposal = $this->proposalService->create($dto);
 
         return redirect()->route('proposals.index')->with('success', 'Proposta criada com sucesso!');
     }
 
-    // Mostra o formulário para editar uma proposta
     public function edit(Proposal $proposal)
     {
-        $users = User::all();
-        $events = Event::all();
+        $proposal->load('event'); // garante que a relação está carregada
+
+        // Só dono do evento pode editar
+        if (auth()->id() !== $proposal->event->user_id) {
+            abort(403, 'Você não tem permissão para editar esta proposta.');
+        }
+
         $statuses = ProposalStatus::all();
-        return view('proposals.edit', compact('proposal', 'users', 'events', 'statuses'));
+
+        return view('proposals.edit', compact('proposal', 'statuses'));
     }
 
-    // Atualiza a proposta no banco
+
     public function update(Request $request, Proposal $proposal)
     {
+        $proposal->load('event'); // garante que a relação está carregada
+
+        if (auth()->id() !== $proposal->event->user_id) {
+            abort(403, 'Você não tem permissão para atualizar esta proposta.');
+        }
+
         $data = $request->validate([
-            'event_id' => 'required|exists:events,id',
-            'user_id' => 'required|exists:users,id',
             'proposal_status_id' => 'required|exists:proposal_statuses,id',
-            'title' => 'required|string|max:255',
-            'abstract' => 'required|string',
-            'details' => 'nullable|string',
         ]);
 
         $proposal->update($data);
 
-        return redirect()->route('proposals.index')->with('success', 'Proposta atualizada com sucesso!');
+        return redirect()->route('proposals.index')->with('success', 'Status atualizado com sucesso!');
+}
+
+
+    public function changeStatus(Request $request, Proposal $proposal)
+    {
+        $this->authorize('changeStatus', $proposal);
+
+        $data = $request->validate([
+            'proposal_status_id' => 'required|exists:proposal_statuses,id',
+        ]);
+
+        $dto = new ProposalDTO($data);
+
+        $this->proposalService->update($proposal, $dto);
+
+        return redirect()->route('proposals.index')->with('success', 'Status da proposta atualizado!');
     }
 
-    // Deleta a proposta
     public function destroy(Proposal $proposal)
     {
-        $proposal->delete();
-        return redirect()->route('proposals.index')->with('success', 'Proposta excluída com sucesso!');
+        $this->authorize('delete', $proposal);
+
+        $this->proposalService->delete($proposal);
+
+        return redirect()->route('proposals.index')->with('success', 'Proposta removida com sucesso!');
     }
 
-    // (Opcional) Mostra detalhes da proposta
     public function show(Proposal $proposal)
     {
         return view('proposals.show', compact('proposal'));
